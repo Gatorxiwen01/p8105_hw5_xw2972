@@ -1,0 +1,163 @@
+---
+title: "p8105_hw5_xw2972"
+author: "Xiwen Wu"
+output: github_document
+date: 2024-11-14
+---
+
+Question 1:
+```{r}
+simulate_birthday <- function(n) {
+  birthdays <- sample(1:365, n, replace = TRUE)
+  any(duplicated(birthdays))
+}
+
+set.seed(123) 
+group_sizes <- 2:50
+n_simulations <- 10000
+
+probabilities <- numeric(length(group_sizes))
+
+for (i in seq_along(group_sizes)) {
+  n <- group_sizes[i]
+  probabilities[i] <- mean(replicate(n_simulations, simulate_birthday(n)))
+}
+
+plot(group_sizes, probabilities, type = "b", 
+     col = "blue", pch = 16, lwd = 2,
+     xlab = "Group Size", 
+     ylab = "Probability of Shared Birthday",
+     main = "Probability of At Least Two People Sharing a Birthday")
+
+cat("Results: The probability of at least two people sharing a birthday rises rapidly with group size. 
+For a group size of 23, the probability exceeds 50%, demonstrating the counter-intuitive nature 
+of the Birthday Paradox.")
+```
+Question 2:
+```{r}
+library(broom)
+library(ggplot2)
+library(dplyr)
+
+n <- 30
+sigma <- 5
+mu_values <- 0:6
+n_simulations <- 5000
+alpha <- 0.05
+
+simulate_t_test <- function(mu, n, sigma, alpha) {
+  results <- replicate(n_simulations, {
+    x <- rnorm(n, mean = mu, sd = sigma)
+    test <- t.test(x, mu = 0)
+    c(mu_hat = test$estimate, p_value = test$p.value)
+  })
+  
+  results_df <- as.data.frame(t(results))
+  colnames(results_df) <- c("mu_hat", "p_value")
+  results_df
+}
+
+simulation_results <- lapply(mu_values, function(mu) {
+  results <- simulate_t_test(mu, n, sigma, alpha)
+  results$mu <- mu 
+  results
+}) %>% bind_rows()
+
+summary_results <- simulation_results %>%
+  group_by(mu) %>%
+  summarise(
+    power = mean(p_value < alpha),
+    avg_mu_hat = mean(mu_hat),
+    avg_mu_hat_reject = mean(mu_hat[p_value < alpha], na.rm = TRUE)
+  )
+
+ggplot(summary_results, aes(x = mu, y = power)) +
+  geom_line(color = "blue", size = 1) +
+  geom_point(color = "blue") +
+  labs(
+    title = "Power of the Test vs. Effect Size",
+    x = "True Value of μ",
+    y = "Power"
+  ) +
+  theme_minimal()
+
+ggplot(summary_results, aes(x = mu)) +
+  geom_line(aes(y = avg_mu_hat), color = "red", size = 1) +
+  geom_point(aes(y = avg_mu_hat), color = "red") +
+  geom_line(aes(y = avg_mu_hat_reject), color = "green", size = 1) +
+  geom_point(aes(y = avg_mu_hat_reject), color = "green") +
+  labs(
+    title = "Average Estimate of μ̂ vs. True Value of μ",
+    x = "True Value of μ",
+    y = "Average Estimate of μ̂"
+  ) +
+  theme_minimal()
+
+cat("
+1. The first plot shows that the power of the test increases with the effect size (true μ).
+   Power approaches 1 as μ increases, meaning the test is highly likely to reject the null hypothesis when the effect is large.
+
+2. The second plot demonstrates:
+   - The average μ̂ across all samples aligns closely with the true μ.
+   - However, in samples where the null hypothesis is rejected (green line), the average μ̂ is consistently higher than the true μ.
+   This occurs due to 'selection bias' or 'winner's curse', where significant results tend to overestimate the effect size due to random variation.
+")
+```
+Question 3:
+```{r}
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(broom)
+library(ggplot2)
+url <- "https://raw.githubusercontent.com/washingtonpost/data-homicides/master/homicide-data.csv"
+homicide_data <- read.csv(url)
+
+str(homicide_data)
+head(homicide_data)
+homicide_data <- homicide_data %>%
+  mutate(city_state = paste(city, state, sep = ", "))
+city_summary <- homicide_data %>%
+  group_by(city_state) %>%
+  summarise(
+    total_homicides = n(),
+    unsolved_homicides = sum(disposition %in% c("Closed without arrest", "Open/No arrest"))
+  )
+baltimore_data <- city_summary %>%
+  filter(city_state == "Baltimore, MD")
+
+prop_test_baltimore <- prop.test(
+  baltimore_data$unsolved_homicides,
+  baltimore_data$total_homicides
+)
+
+baltimore_result <- broom::tidy(prop_test_baltimore)
+
+baltimore_result %>%
+  select(estimate, conf.low, conf.high)
+city_results <- city_summary %>%
+  mutate(
+    test_results = map2(
+      unsolved_homicides,
+      total_homicides,
+      ~ prop.test(.x, .y) %>% tidy()
+    )
+  ) %>%
+  unnest(test_results)
+city_results <- city_results %>%
+  arrange(desc(estimate)) %>%
+  mutate(city_state = factor(city_state, levels = city_state))
+
+ggplot(city_results, aes(x = city_state, y = estimate)) +
+  geom_point(color = "blue") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  coord_flip() +
+  labs(
+    title = "Proportion of Unsolved Homicides by City",
+    x = "City",
+    y = "Proportion of Unsolved Homicides",
+    caption = "Source: Washington Post Homicide Data"
+  ) +
+  theme_minimal()+
+  theme(axis.text.y = element_text(size = 4))
+```
